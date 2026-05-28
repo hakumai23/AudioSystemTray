@@ -1,0 +1,21 @@
+[package]
+name = "audio-system-tray"
+version = "0.1.0"
+edition = "2021"
+description = "Native PipeWire/WirePlumber audio sink switcher system tray for Wayland (Hyprland)"
+license = "MIT"
+
+[[bin]]
+name = "audio-system-tray"
+path = "src/main.rs"
+
+[dependencies]
+ksni  = "0.3"
+tokio = { version = "1", features = ["full"] }
+
+[profile.release]
+opt-level     = "z"   # Optimise for binary size
+lto           = true  # Link-Time Optimisation
+codegen-units = 1     # Single codegen unit for maximum optimisation
+strip         = true  # Strip debug symbols from binary
+panic         = "abort"
