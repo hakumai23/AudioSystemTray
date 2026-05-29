@@ -30,9 +30,7 @@ A native **PipeWire/WirePlumber** audio sink switcher system tray application fo
 
 > **Note**: The application automatically detects which audio backend is available on your system.
 
-## v1.0.0
-
-### Installation
+## Installation
 
 | Distribution | Command |
 |---|---|
