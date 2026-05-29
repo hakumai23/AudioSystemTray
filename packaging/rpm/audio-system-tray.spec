@@ -5,11 +5,11 @@ Summary:        Native PipeWire/PulseAudio audio sink switcher system tray
 
 License:        MIT
 URL:            https://github.com/hakumai23/AudioSystemTray
-# In a local development build, we assume the sources are copied to the build directory.
-Source0:        audio-system-tray-%{version}.tar.gz
+BuildArch:      x86_64
 
-BuildRequires:  cargo
-BuildRequires:  rust
+# Passed in by `make rpm` via --define "_binary <path>" and "--define "_desktop <path>"
+%global binary  %{?_binary}%{!?_binary:/usr/local/bin/audio-system-tray}
+%global desktop %{?_desktop}%{!?_desktop:audio-system-tray.desktop}
 
 %description
 Native Status Notifier Item (SNI) tray icon daemon that dynamically lists
@@ -17,19 +17,18 @@ and switches default audio output sinks. Works with Waybar, Hyprland, GNOME,
 KDE, XFCE, and other desktop environments.
 
 %prep
-# No-op for local build if we prepare source archive, otherwise normal setup
-%setup -q
+# Nothing to prepare — binary is pre-built
 
 %build
-cargo build --release --locked
+# Nothing to build — binary is pre-built
 
 %install
 rm -rf $RPM_BUILD_ROOT
 install -d $RPM_BUILD_ROOT/%{_bindir}
 install -d $RPM_BUILD_ROOT/%{_datadir}/applications
 
-install -m 755 target/release/audio-system-tray $RPM_BUILD_ROOT/%{_bindir}/audio-system-tray
-install -m 644 audio-system-tray.desktop $RPM_BUILD_ROOT/%{_datadir}/applications/audio-system-tray.desktop
+install -m 755 %{binary}  $RPM_BUILD_ROOT/%{_bindir}/audio-system-tray
+install -m 644 %{desktop} $RPM_BUILD_ROOT/%{_datadir}/applications/audio-system-tray.desktop
 
 %files
 %{_bindir}/audio-system-tray

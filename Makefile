@@ -44,10 +44,20 @@ deb:
 
 rpm:
 	@echo "Building RPM package..."
-	@mkdir -p target/rpm/SOURCES target/rpm/SPECS target/rpm/BUILD target/rpm/RPMS target/rpm/SRPMS
-	@tar --transform 's,^,audio-system-tray-0.1.0/,' -czf target/rpm/SOURCES/audio-system-tray-0.1.0.tar.gz Cargo.toml Cargo.lock src/ Makefile audio-system-tray.desktop
-	@cp packaging/rpm/audio-system-tray.spec target/rpm/SPECS/
-	@rpmbuild -bb target/rpm/SPECS/audio-system-tray.spec --define "_topdir $(PWD)/target/rpm" || echo "Note: rpmbuild failed. Make sure rpm-build (rpmbuild) is installed."
+	@if [ -f "$(BINARY_STATIC)" ]; then \
+		INSTALL_BIN="$(BINARY_STATIC)"; \
+	elif [ -f "$(BINARY_NATIVE)" ]; then \
+		INSTALL_BIN="$(BINARY_NATIVE)"; \
+	else \
+		echo "Error: Binary not found. Run 'make build' or 'make build-native' first."; \
+		exit 1; \
+	fi; \
+	mkdir -p target/rpm/SOURCES target/rpm/SPECS target/rpm/BUILD target/rpm/RPMS target/rpm/SRPMS; \
+	cp packaging/rpm/audio-system-tray.spec target/rpm/SPECS/; \
+	rpmbuild -bb target/rpm/SPECS/audio-system-tray.spec \
+		--define "_topdir $(PWD)/target/rpm" \
+		--define "_binary $(PWD)/$$INSTALL_BIN" \
+		--define "_desktop $(PWD)/audio-system-tray.desktop"
 
 arch:
 	@echo "Building Arch Linux package..."
@@ -63,7 +73,7 @@ arch:
 	fi
 	@cp audio-system-tray.desktop target/arch/
 	@cp packaging/arch/PKGBUILD target/arch/
-	@cd target/arch && makepkg -f -d || echo "Note: makepkg failed."
+	@cd target/arch && makepkg -f -d
 
 packages: deb rpm arch
 
