@@ -38,8 +38,6 @@ A native **PipeWire/WirePlumber** audio sink switcher system tray application fo
 | **Debian / Ubuntu** | `sudo dpkg -i audio-system-tray_*.deb` |
 | **Fedora / RHEL** | `sudo rpm -i audio-system-tray-*.rpm` |
 
-it is not on AUR and Arch repository(I haven't publish yet).
-
 ### Manual Installation from Source
 
 #### Prerequisites
