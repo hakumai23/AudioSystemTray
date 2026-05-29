@@ -7,30 +7,24 @@
 mod wpctl;
 
 use ksni::{
-    menu::{RadioGroup, RadioItem, StandardItem},
+    menu::StandardItem,
     MenuItem, Tray, TrayMethods,
 };
+use std::sync::{Arc, Mutex};
 use wpctl::AudioSink;
 
 // ─── Tray state ───────────────────────────────────────────────────────────────
 
-#[derive(Debug)]
 struct AudioTray {
     /// Most-recently-discovered sinks.
     sinks: Vec<AudioSink>,
+    /// Thread-safe reference to the tray's own handle to trigger updates.
+    handle: Arc<Mutex<Option<ksni::Handle<AudioTray>>>>,
 }
 
 impl AudioTray {
-    fn new(sinks: Vec<AudioSink>) -> Self {
-        Self { sinks }
-    }
-
-    /// Index of the current default sink in `self.sinks`, or 0 if none found.
-    fn default_index(&self) -> usize {
-        self.sinks
-            .iter()
-            .position(|s| s.is_default)
-            .unwrap_or(0)
+    fn new(sinks: Vec<AudioSink>, handle: Arc<Mutex<Option<ksni::Handle<AudioTray>>>>) -> Self {
+        Self { sinks, handle }
     }
 }
 
@@ -63,63 +57,81 @@ impl Tray for AudioTray {
 
         let separator_top = MenuItem::Separator;
 
-        // Build RadioItem list from discovered sinks.
-        let radio_items: Vec<RadioItem> = self
-            .sinks
-            .iter()
-            .map(|s| RadioItem {
-                label: s.name.clone(),
-                ..Default::default()
-            })
-            .collect();
+        let mut menu_items = vec![header, separator_top];
 
-        // Clone sink IDs so the callback closure can own them.
-        let sink_ids: Vec<u32> = self.sinks.iter().map(|s| s.id).collect();
-
-        let radio_group = if radio_items.is_empty() {
-            StandardItem {
-                label: "(no audio sinks found)".into(),
-                enabled: false,
-                ..Default::default()
-            }
-            .into()
+        if self.sinks.is_empty() {
+            menu_items.push(
+                StandardItem {
+                    label: "(no audio sinks found)".into(),
+                    enabled: false,
+                    ..Default::default()
+                }
+                .into(),
+            );
         } else {
-            RadioGroup {
-                selected: self.default_index(),
-                select: Box::new(move |tray: &mut AudioTray, idx: usize| {
-                    let Some(&id) = sink_ids.get(idx) else { return };
+            // Use StandardItem with Unicode indicators instead of CheckmarkItem/RadioGroup.
+            // This bypasses bugs in Waybar and other status bars where DBusMenu toggle properties
+            // fail to render correctly after dynamic state changes.
+            for sink in &self.sinks {
+                let id = sink.id;
+                
+                let indicator = if sink.is_default { "● " } else { "  " };
+                let label_text = format!("{}{}", indicator, sink.name);
 
-                    // Execute synchronously to avoid nested async runtime panics.
-                    if let Err(e) = wpctl::set_default(id) {
-                        eprintln!("[audio-system-tray] set-default {id} failed: {e}");
-                        return;
-                    }
+                let item = StandardItem {
+                    label: label_text,
+                    activate: Box::new(move |tray: &mut AudioTray| {
+                        if let Err(e) = wpctl::set_default(id) {
+                            eprintln!("[audio-system-tray] set-default {id} failed: {e}");
+                            return;
+                        }
 
-                    // Re-fetch sinks immediately.
-                    match wpctl::get_sinks() {
-                        Ok(fresh_sinks) => tray.sinks = fresh_sinks,
-                        Err(e) => eprintln!("[audio-system-tray] refresh failed: {e}"),
-                    }
-                }),
-                options: radio_items,
-                ..Default::default()
+                        // Optimistically update our state to avoid race conditions
+                        // where `wpctl status` might not reflect the change instantly.
+                        for s in &mut tray.sinks {
+                            s.is_default = s.id == id;
+                        }
+
+                        // Trigger an update asynchronously on the Tokio executor
+                        // to notify the status bar that the layout/states changed.
+                        let handle_opt = tray.handle.lock().unwrap().clone();
+                        if let Some(h) = handle_opt {
+                            tokio::spawn(async move {
+                                let _ = h.update(|_| {}).await;
+                            });
+                        }
+                    }),
+                    ..Default::default()
+                };
+                menu_items.push(item.into());
             }
-            .into()
-        };
+        }
 
         let separator_mid = MenuItem::Separator;
+        menu_items.push(separator_mid);
 
         let refresh = StandardItem {
             label: "↺  Refresh".into(),
             activate: Box::new(move |tray: &mut AudioTray| {
                 match wpctl::get_sinks() {
-                    Ok(fresh_sinks) => tray.sinks = fresh_sinks,
+                    Ok(fresh_sinks) => {
+                        tray.sinks = fresh_sinks;
+
+                        // Trigger update notification
+                        let handle_opt = tray.handle.lock().unwrap().clone();
+                        if let Some(h) = handle_opt {
+                            tokio::spawn(async move {
+                                let _ = h.update(|_| {}).await;
+                            });
+                        }
+                    }
                     Err(e) => eprintln!("[audio-system-tray] refresh failed: {e}"),
                 }
             }),
             ..Default::default()
         }
         .into();
+        menu_items.push(refresh);
 
         let quit = StandardItem {
             label: "Quit".into(),
@@ -128,8 +140,9 @@ impl Tray for AudioTray {
             ..Default::default()
         }
         .into();
+        menu_items.push(quit);
 
-        vec![header, separator_top, radio_group, separator_mid, refresh, quit]
+        menu_items
     }
 }
 
@@ -154,10 +167,11 @@ async fn main() {
         sinks.len()
     );
 
-    let tray = AudioTray::new(sinks);
+    let handle_shared = Arc::new(Mutex::new(None));
+    let tray = AudioTray::new(sinks, handle_shared.clone());
 
     // Spawn the SNI tray service.
-    let _handle = match tray.spawn().await {
+    let handle = match tray.spawn().await {
         Ok(h) => h,
         Err(e) => {
             eprintln!(
@@ -167,6 +181,9 @@ async fn main() {
             std::process::exit(1);
         }
     };
+
+    // Store the handle in our shared structure so the menu callback can trigger updates.
+    *handle_shared.lock().unwrap() = Some(handle);
 
     eprintln!("[audio-system-tray] Running. Use your status bar tray to switch audio output.");
     std::future::pending::<()>().await;
