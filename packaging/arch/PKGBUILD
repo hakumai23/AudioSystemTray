@@ -1,0 +1,16 @@
+# Maintainer: hakumai23
+pkgname=audio-system-tray
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Native PipeWire/PulseAudio audio sink switcher system tray"
+arch=('x86_64')
+license=('MIT')
+depends=('hicolor-icon-theme')
+source=("audio-system-tray"
+        "audio-system-tray.desktop")
+sha256sums=('SKIP' 'SKIP')
+
+package() {
+  install -Dm755 "${srcdir}/audio-system-tray" "${pkgdir}/usr/bin/audio-system-tray"
+  install -Dm644 "${srcdir}/audio-system-tray.desktop" "${pkgdir}/usr/share/applications/audio-system-tray.desktop"
+}

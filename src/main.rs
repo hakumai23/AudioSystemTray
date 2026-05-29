@@ -1,17 +1,17 @@
-//! audio-system-tray — Native PipeWire sink switcher system tray daemon
+//! audio-system-tray — Native PipeWire/PulseAudio sink switcher system tray daemon
 //!
 //! Implements a Status Notifier Item (SNI) tray icon using `ksni` that lets
 //! the user switch the default audio output sink from a context menu populated
-//! dynamically from `wpctl status`.
+//! dynamically from the detected audio backend (wpctl or pactl).
 
-mod wpctl;
+mod backend;
 
 use ksni::{
     menu::StandardItem,
     MenuItem, Tray, TrayMethods,
 };
 use std::sync::{Arc, Mutex};
-use wpctl::AudioSink;
+use backend::{AudioSink, AudioBackend};
 
 // ─── Tray state ───────────────────────────────────────────────────────────────
 
@@ -20,11 +20,17 @@ struct AudioTray {
     sinks: Vec<AudioSink>,
     /// Thread-safe reference to the tray's own handle to trigger updates.
     handle: Arc<Mutex<Option<ksni::Handle<AudioTray>>>>,
+    /// Active audio backend interface.
+    backend: Arc<dyn AudioBackend>,
 }
 
 impl AudioTray {
-    fn new(sinks: Vec<AudioSink>, handle: Arc<Mutex<Option<ksni::Handle<AudioTray>>>>) -> Self {
-        Self { sinks, handle }
+    fn new(
+        sinks: Vec<AudioSink>,
+        handle: Arc<Mutex<Option<ksni::Handle<AudioTray>>>>,
+        backend: Arc<dyn AudioBackend>,
+    ) -> Self {
+        Self { sinks, handle, backend }
     }
 }
 
@@ -73,7 +79,7 @@ impl Tray for AudioTray {
             // This bypasses bugs in Waybar and other status bars where DBusMenu toggle properties
             // fail to render correctly after dynamic state changes.
             for sink in &self.sinks {
-                let id = sink.id;
+                let id = sink.id.clone();
                 
                 let indicator = if sink.is_default { "● " } else { "  " };
                 let label_text = format!("{}{}", indicator, sink.name);
@@ -81,13 +87,13 @@ impl Tray for AudioTray {
                 let item = StandardItem {
                     label: label_text,
                     activate: Box::new(move |tray: &mut AudioTray| {
-                        if let Err(e) = wpctl::set_default(id) {
+                        if let Err(e) = tray.backend.set_default(&id) {
                             eprintln!("[audio-system-tray] set-default {id} failed: {e}");
                             return;
                         }
 
                         // Optimistically update our state to avoid race conditions
-                        // where `wpctl status` might not reflect the change instantly.
+                        // where the system status might not reflect the change instantly.
                         for s in &mut tray.sinks {
                             s.is_default = s.id == id;
                         }
@@ -113,7 +119,7 @@ impl Tray for AudioTray {
         let refresh = StandardItem {
             label: "↺  Refresh".into(),
             activate: Box::new(move |tray: &mut AudioTray| {
-                match wpctl::get_sinks() {
+                match tray.backend.get_sinks() {
                     Ok(fresh_sinks) => {
                         tray.sinks = fresh_sinks;
 
@@ -150,13 +156,30 @@ impl Tray for AudioTray {
 
 #[tokio::main]
 async fn main() {
+    // Detect the audio backend to run
+    let backend: Arc<dyn AudioBackend> = match backend::detect_backend() {
+        Some(b) => Arc::from(b),
+        None => {
+            eprintln!(
+                "[audio-system-tray] Fatal: could not detect active wpctl or pactl backend.\n\
+                 Make sure WirePlumber or PulseAudio is running."
+            );
+            std::process::exit(1);
+        }
+    };
+
+    eprintln!(
+        "[audio-system-tray] Detected audio backend: {}",
+        backend.name()
+    );
+
     // Initial sink discovery.
-    let sinks = match wpctl::get_sinks() {
+    let sinks = match backend.get_sinks() {
         Ok(s) => s,
         Err(e) => {
             eprintln!(
-                "[audio-system-tray] Fatal: could not query wpctl: {e}\n\
-                 Make sure WirePlumber is running."
+                "[audio-system-tray] Fatal: could not query audio sinks: {e}\n\
+                 Make sure your audio daemon is running."
             );
             std::process::exit(1);
         }
@@ -168,7 +191,7 @@ async fn main() {
     );
 
     let handle_shared = Arc::new(Mutex::new(None));
-    let tray = AudioTray::new(sinks, handle_shared.clone());
+    let tray = AudioTray::new(sinks, handle_shared.clone(), backend.clone());
 
     // Spawn the SNI tray service.
     let handle = match tray.spawn().await {
