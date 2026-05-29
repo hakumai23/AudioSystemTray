@@ -32,45 +32,13 @@ A native **PipeWire/WirePlumber** audio sink switcher system tray application fo
 
 ## Installation
 
-### Arch Linux
+| Distribution | Command |
+|---|---|
+| **Arch Linux** | `sudo pacman -U audio-system-tray-*.pkg.tar.zst` |
+| **Debian / Ubuntu** | `sudo dpkg -i audio-system-tray_*.deb` |
+| **Fedora / RHEL** | `sudo rpm -i audio-system-tray-*.rpm` |
 
-```bash
-sudo pacman -S audio-system-tray
-```
-
-Or from the official repositories (if available):
-
-```bash
-yay -S audio-system-tray
-# or
-paru -S audio-system-tray
-```
-
-### Debian / Ubuntu
-
-```bash
-sudo apt-get install audio-system-tray
-```
-
-Or download and install the `.deb` package manually:
-
-```bash
-wget https://github.com/hakumai23/AudioSystemTray/releases/download/latest/audio-system-tray_*.deb
-sudo dpkg -i audio-system-tray_*.deb
-```
-
-### Fedora / RHEL / CentOS
-
-```bash
-sudo dnf install audio-system-tray
-```
-
-Or using `rpm`:
-
-```bash
-wget https://github.com/hakumai23/AudioSystemTray/releases/download/latest/audio-system-tray-*.rpm
-sudo rpm -i audio-system-tray-*.rpm
-```
+it is not on AUR and Arch repository(I haven't publish yet).
 
 ### Manual Installation from Source
 
