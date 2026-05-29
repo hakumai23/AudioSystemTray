@@ -215,7 +215,7 @@ The project uses:
 
 1. Verify your system tray supports the SNI protocol:
    ```bash
-   gdbus introspect --system /org/freedesktop/DBus
+   gdbus introspect --system --dest org.freedesktop.DBus --object-path /org/freedesktop/DBus
    ```
 
 2. Check if the application is running:
