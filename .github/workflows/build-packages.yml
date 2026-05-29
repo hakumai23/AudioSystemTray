@@ -1,0 +1,134 @@
+name: Build & Package
+
+on:
+  push:
+    branches: [ "main" ]
+    tags: [ "v*" ]
+  pull_request:
+    branches: [ "main" ]
+
+permissions:
+  contents: write
+
+jobs:
+  # ─── Debian & RPM ────────────────────────────────────────────────────────────
+  build-deb-rpm:
+    name: Build Debian & RPM Packages
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Rust
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Cache Cargo registry
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-
+
+    - name: Install packaging tools
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y rpm dpkg
+
+    - name: Run unit tests
+      run: make test
+
+    - name: Compile release binary
+      run: make build-native
+
+    - name: Build Debian package
+      run: make deb
+
+    - name: Build RPM package
+      run: make rpm
+
+    - name: Upload Debian & RPM artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: debian-rpm-packages
+        path: |
+          target/*.deb
+          target/rpm/RPMS/**/*.rpm
+
+  # ─── Arch Linux ──────────────────────────────────────────────────────────────
+  build-arch:
+    name: Build Arch Linux Package
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Install dependencies
+      run: |
+        pacman-key --init
+        pacman-key --populate archlinux
+        pacman -Syu --noconfirm --needed base-devel cargo git sudo
+
+    - name: Build Arch package as non-root user
+      run: |
+        # makepkg cannot run as root — create a temporary builder account.
+        useradd -m builder
+        echo "builder ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
+        chown -R builder:builder .
+        su builder -c "make arch"
+
+    - name: Upload Arch package artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: arch-package
+        path: target/arch/*.pkg.tar.zst
+
+  # ─── GitHub Release (tags only) ──────────────────────────────────────────────
+  release:
+    name: Publish GitHub Release
+    needs: [ build-deb-rpm, build-arch ]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+
+    steps:
+    - name: Download Debian & RPM packages
+      uses: actions/download-artifact@v4
+      with:
+        name: debian-rpm-packages
+        path: dist/
+
+    - name: Download Arch package
+      uses: actions/download-artifact@v4
+      with:
+        name: arch-package
+        path: dist/
+
+    - name: List release assets
+      run: ls -lh dist/
+
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v2
+      with:
+        name: "audio-system-tray ${{ github.ref_name }}"
+        body: |
+          ## ${{ github.ref_name }}
+
+          ### Installation
+
+          | Distribution | Command |
+          |---|---|
+          | **Arch Linux** | `sudo pacman -U audio-system-tray-*.pkg.tar.zst` |
+          | **Debian / Ubuntu** | `sudo dpkg -i audio-system-tray_*.deb` |
+          | **Fedora / RHEL** | `sudo rpm -i audio-system-tray-*.rpm` |
+
+          See the [README](https://github.com/${{ github.repository }}) for full installation and usage instructions.
+        draft: false
+        prerelease: ${{ contains(github.ref_name, '-') }}
+        files: dist/**/*
